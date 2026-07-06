@@ -1,7 +1,10 @@
 import express from "express";
 import cors, { type CorsOptions } from "cors";
 import { env } from "./config/env";
-import { aiRoutes, healthRoutes } from "./routes";
+import {
+    aiRoutes,
+    healthRoutes,
+} from "./routes";
 
 const app = express();
 const allowedOrigins = new Set(env.CORS_ORIGINS);
@@ -39,3 +42,4 @@ app.use("/api/ai", aiRoutes);
 app.use("/api/health", healthRoutes);
 
 export default app;
+
