@@ -234,12 +234,17 @@ function App() {
 
   const askAiWithCrop = async (crop: SmartCrop, underline: Stroke) => {
     try {
+      console.log("askAiWithCrop started");
+      console.log("crop:", crop);
+      console.log("underline:", underline);
       const imageBase64 = getCroppedImageBase64(crop);
 
       if (!imageBase64) {
         console.error("Could not capture cropped image");
         return;
       }
+
+      const underlineBounds = getStrokeBounds(underline);
 
       const response = await fetch("http://192.168.1.66:3001/api/ai/ask", {
         method: "POST",
@@ -250,8 +255,10 @@ function App() {
           prompt:
             "Read the handwritten question in this image and answer it directly. Return answer strokes.",
           imageBase64,
+          underline,
           placement: {
-            underlineBounds: getStrokeBounds(underline),
+            x: underlineBounds.minX,
+            y: underlineBounds.maxY + crop.averageLineHeight * 1.6,
             averageLineHeight: crop.averageLineHeight,
             width: underline.width,
             color: underline.color,
@@ -259,8 +266,8 @@ function App() {
         }),
       });
 
+      console.log("fetch returned:", response.status);
       const data = await response.json();
-
       if (Array.isArray(data.strokes)) {
         setStrokes((prev) => [...prev, ...data.strokes]);
       }
@@ -320,9 +327,7 @@ function App() {
       if (!detectUnderline(underline)) return;
 
       console.log("Underline hold detected");
-
       animateUnderlineBurn(underline);
-
       const crop = getSmartCropForUnderline(underline, strokes);
 
       if (!crop) return;
@@ -546,14 +551,16 @@ function App() {
                 lineJoin="round"
               />
 
-              {underlineBurn?.remainingPath.length &&
+              {underlineBurn &&
+                underlineBurn.remainingPath.length >= 4 &&
                 renderPathShape(
                   underlineBurn.remainingPath,
                   "#111",
                   underlineBurn.width,
                 )}
 
-              {underlineBurn?.bluePath.length &&
+              {underlineBurn &&
+                underlineBurn.bluePath.length >= 4 &&
                 renderPathShape(
                   underlineBurn.bluePath,
                   "#38bdf8",
