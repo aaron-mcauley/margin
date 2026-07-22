@@ -26,7 +26,7 @@ export async function askAI(req: Request, res: Response) {
         // Later this will come from the logged-in user's profile.
         const profile = undefined;
 
-        const strokes = generateHandwritingStrokes({
+        const strokes = await generateHandwritingStrokes({
             text: answer,
             placement,
         });

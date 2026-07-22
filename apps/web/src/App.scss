@@ -4,7 +4,12 @@
 
 html,
 body,
-#root {
+#root,
+.app {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
   margin: 0;
   width: 100%;
   height: 100%;
@@ -116,4 +121,20 @@ body,
   color: black;
   border: 2px solid black;
   padding: 12px;
+}
+
+.canvasLayer,
+.canvasLayer canvas,
+.notePage,
+.workspace {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+canvas {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }

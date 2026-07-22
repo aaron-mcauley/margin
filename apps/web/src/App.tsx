@@ -35,12 +35,12 @@ function App() {
   const activeStrokeRef = useRef<Stroke | null>(null);
   const drawingLayerRef = useRef<Konva.Layer | null>(null);
   const burnedStrokeIdRef = useRef<string | null>(null);
-
+  const activePointerIdRef = useRef<number | null>(null);
   const [tool, setTool] = useState<Tool>("pen");
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [strokeWidth, setStrokeWidth] = useState(1.3);
   const [strokeColor, setStrokeColor] = useState("#111");
-  const [isDrawing, setIsDrawing] = useState(false);
+  //const [isDrawing, setIsDrawing] = useState(false);\
   const [underlineBurn, setUnderlineBurn] = useState<UnderlineBurn | null>(
     null,
   );
@@ -62,6 +62,18 @@ function App() {
       maxX: Math.max(...xs),
       minY: Math.min(...ys),
       maxY: Math.max(...ys),
+    };
+  };
+
+  const getEventPoint = (e: any) => {
+    const stage = stageRef.current;
+    if (!stage) return null;
+
+    const rect = stage.container().getBoundingClientRect();
+
+    return {
+      x: ((e.evt.clientX - rect.left) / rect.width) * stage.width(),
+      y: ((e.evt.clientY - rect.top) / rect.height) * stage.height(),
     };
   };
 
@@ -217,8 +229,10 @@ function App() {
         context.lineTo(points[points.length - 2], points[points.length - 1]);
         context.strokeShape(shape);
       }}
-      stroke={stroke.type === "underline" ? "#2563eb" : stroke.color}
-      strokeWidth={stroke.width}
+      stroke={
+        stroke.type === "underline" ? "#2563eb" : (stroke.color ?? "#111")
+      }
+      strokeWidth={stroke.width ?? 1.3}
       lineCap="round"
       lineJoin="round"
     />
@@ -260,6 +274,7 @@ function App() {
             x: underlineBounds.minX,
             y: underlineBounds.maxY + crop.averageLineHeight * 1.6,
             averageLineHeight: crop.averageLineHeight,
+            maxWidth: 520,
             width: underline.width,
             color: underline.color,
           },
@@ -268,8 +283,21 @@ function App() {
 
       console.log("fetch returned:", response.status);
       const data = await response.json();
+
+      console.log("RESPONSE DATA:", data);
+      console.log("STROKE COUNT:", data.strokes?.length);
+      console.log("FIRST STROKE:", data.strokes?.[0]);
       if (Array.isArray(data.strokes)) {
-        setStrokes((prev) => [...prev, ...data.strokes]);
+        const generatedStrokes: Stroke[] = data.strokes.map(
+          (stroke: Partial<Stroke>, index: number) => ({
+            id: stroke.id ?? `ai-${Date.now()}-${index}`,
+            type: "ink",
+            points: stroke.points ?? [],
+            width: stroke.width ?? strokeWidth,
+            color: stroke.color ?? strokeColor,
+          }),
+        );
+        await animateGeneratedStrokes(generatedStrokes);
       }
 
       console.log("AI response:", data);
@@ -278,6 +306,53 @@ function App() {
     }
   };
 
+  const animateGeneratedStrokes = async (generatedStrokes: Stroke[]) => {
+    for (const stroke of generatedStrokes) {
+      await new Promise<void>((resolve) => {
+        let pointIndex = 4;
+
+        const anmiatedStroke: Stroke = {
+          ...stroke,
+          points: stroke.points.slice(0, pointIndex),
+        };
+
+        setStrokes((prev) => [...prev, anmiatedStroke]);
+
+        const interval = setInterval(() => {
+          pointIndex += 4;
+
+          setStrokes((prev) =>
+            prev.map((existingStroke) =>
+              existingStroke.id === stroke.id
+                ? {
+                    ...existingStroke,
+                    points: stroke.points.slice(0, pointIndex),
+                  }
+                : existingStroke,
+            ),
+          );
+
+          if (pointIndex >= stroke.points.length) {
+            clearInterval(interval);
+
+            setStrokes((prev) =>
+              prev.map((existingStroke) =>
+                existingStroke.id === stroke.id
+                  ? {
+                      ...existingStroke,
+                      points: stroke.points,
+                    }
+                  : existingStroke,
+              ),
+            );
+
+            resolve();
+          }
+        }, 12);
+      });
+      0;
+    }
+  };
   const animateUnderlineBurn = (underline: Stroke) => {
     const points = underline.points;
     burnedStrokeIdRef.current = underline.id;
@@ -313,7 +388,7 @@ function App() {
         width: underline.width,
       });
 
-      i += 6;
+      i += 24;
     }, 16);
   };
 
@@ -337,19 +412,28 @@ function App() {
   };
 
   const startDrawing = (e: any) => {
+    // e.evt.preventDefault();
+    console.log("DOWN", e.evt.pointerType);
+
+    if (e.evt.pointerType !== "pen" && e.evt.pointerType !== "mouse") {
+      return;
+    }
     cancelHoldTimer();
     e.evt.preventDefault();
 
     if (tool !== "pen") return;
 
-    const stage = e.target.getStage();
-    const point = stage?.getPointerPosition();
+    activePointerIdRef.current = e.evt.pointerId;
+    e.evt.target.setPointerCapture?.(e.evt.pointerId);
+
+    const point = getEventPoint(e);
+
+    if (!point) return;
 
     if (!point) return;
 
     lastPointRef.current = point;
-    setIsDrawing(true);
-
+    console.log("Creating stroke");
     activeStrokeRef.current = {
       id: `${Date.now()}-${Math.random()}`,
       points: [point.x, point.y],
@@ -360,10 +444,17 @@ function App() {
   };
 
   const draw = (e: any) => {
+    //e.evt.preventDefault();
+    console.log("MOVE");
+    if (e.evt.pointerType !== "pen" && e.evt.pointerType !== "mouse") {
+      return;
+    }
     e.evt.preventDefault();
 
-    const stage = e.target.getStage();
-    const point = stage.getPointerPosition();
+    if (e.evt.pointerId !== activePointerIdRef.current) {
+      return;
+    }
+    const point = getEventPoint(e);
 
     if (!point) return;
 
@@ -386,11 +477,19 @@ function App() {
       return;
     }
 
-    if (!isDrawing || !activeStrokeRef.current) return;
+    if (!activeStrokeRef.current) return;
+
+    const nativeEvent = e.evt as PointerEvent;
+    const events = nativeEvent.getCoalescedEvents?.() ?? [nativeEvent];
+
+    const newPoints = events.flatMap((event) => {
+      const eventPoint = getEventPoint({ evt: event });
+      return eventPoint ? [eventPoint.x, eventPoint.y] : [];
+    });
 
     const updatedStroke: Stroke = {
       ...activeStrokeRef.current,
-      points: activeStrokeRef.current.points.concat([point.x, point.y]),
+      points: [...activeStrokeRef.current.points, ...newPoints],
     };
 
     activeStrokeRef.current = updatedStroke;
@@ -412,19 +511,34 @@ function App() {
     lastPointRef.current = point;
   };
 
-  const stopDrawing = () => {
+  const stopDrawing = (e: any) => {
+    //e.evt.preventDefault();
     cancelHoldTimer();
 
-    const finishedStroke = activeStrokeRef.current;
+    const activeStroke = activeStrokeRef.current;
 
-    if (finishedStroke && finishedStroke.id !== burnedStrokeIdRef.current) {
+    if (!activeStroke) return;
+
+    const endPoint = getEventPoint(e);
+
+    const finishedStroke: Stroke = {
+      ...activeStroke,
+      points: endPoint
+        ? [...activeStroke.points, endPoint.x, endPoint.y]
+        : activeStroke.points,
+    };
+
+    if (
+      finishedStroke.points.length >= 4 &&
+      finishedStroke.id !== burnedStrokeIdRef.current
+    ) {
       setStrokes((prev) => [...prev, finishedStroke]);
     }
 
     lastPointRef.current = null;
     activeStrokeRef.current = null;
+    activePointerIdRef.current = null;
     burnedStrokeIdRef.current = null;
-    setIsDrawing(false);
   };
 
   const renderPathShape = (
@@ -468,7 +582,7 @@ function App() {
   );
 
   return (
-    <div className="app">
+    <div className="app" onContextMenu={(e) => e.preventDefault()}>
       <nav className="navbar">
         <div className="brand">Margin</div>
 
@@ -498,12 +612,10 @@ function App() {
             className="canvasLayer"
             width={794}
             height={1123}
-            onMouseDown={startDrawing}
-            onMouseMove={draw}
-            onMouseUp={stopDrawing}
-            onTouchStart={startDrawing}
-            onTouchMove={draw}
-            onTouchEnd={stopDrawing}
+            onPointerDown={startDrawing}
+            onPointerMove={draw}
+            onPointerUp={stopDrawing}
+            onPointerCancel={stopDrawing}
           >
             <Layer ref={drawingLayerRef}>
               {strokes.map((stroke) => renderSmoothStroke(stroke))}
