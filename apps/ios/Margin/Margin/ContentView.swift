@@ -9,6 +9,8 @@ import SwiftUI
 import PencilKit
 
 struct ContentView: View {
+    private let handwritingManager = HandwritingManager()
+    
     @State private var canvasView = PKCanvasView()
     @State private var statusText = "Ready"
     @State private var isSelecting = false
@@ -34,9 +36,9 @@ struct ContentView: View {
             LegalPadBackground()
                 .ignoresSafeArea()
 
-            CanvasView(
-                canvasView: $canvasView,
-                isEraser: isEraser
+            CanvasView(canvasView: $canvasView,
+                isEraser: isEraser,
+                       handwritingManager: handwritingManager
             )
             .ignoresSafeArea()
 

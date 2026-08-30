@@ -9,26 +9,92 @@ import SwiftUI
 import PencilKit
 
 struct CanvasView: UIViewRepresentable {
+
+    // The actual PKCanvasView owned by ContentView
     @Binding var canvasView: PKCanvasView
+
+    // Current tool selected in ContentView
     var isEraser: Bool
-    
+
+    // Handles completed handwriting strokes
+    let handwritingManager: HandwritingManager
+
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            handwritingManager: handwritingManager
+        )
+    }
+
+
     func makeUIView(context: Context) -> PKCanvasView {
-        canvasView.drawingPolicy = .pencilOnly
+
+        canvasView.delegate = context.coordinator
+
+        // Apple Pencil only
+        canvasView.drawingPolicy = .anyInput
+
         canvasView.backgroundColor = .clear
         canvasView.isOpaque = false
-      return canvasView
+
+        canvasView.tool = PKInkingTool(
+            .pen,
+            color: .black,
+            width: 3
+        )
+
+        return canvasView
     }
-    
-    func updateUIView(_ uiView: PKCanvasView, context: Context) {
+
+
+    func updateUIView(
+        _ canvasView: PKCanvasView,
+        context: Context
+    ) {
+
         if isEraser {
-            uiView.tool = PKEraserTool(.vector)
+
+            canvasView.tool = PKEraserTool(.vector)
+
         } else {
-            uiView.tool = PKInkingTool(
+
+            canvasView.tool = PKInkingTool(
                 .pen,
-                color: UIColor(white: 0.02, alpha: 1.0),
-                width: 5
+                color: .black,
+                width: 3
             )
         }
     }
-}
 
+
+    final class Coordinator: NSObject, PKCanvasViewDelegate {
+
+        private let handwritingManager: HandwritingManager
+
+        private var previousStrokeCount = 0
+
+
+        init(handwritingManager: HandwritingManager) {
+            self.handwritingManager = handwritingManager
+        }
+
+
+        func canvasViewDidEndUsingTool(
+            _ canvasView: PKCanvasView
+        ) {
+
+            let strokes = canvasView.drawing.strokes
+
+            defer {
+                previousStrokeCount = strokes.count
+            }
+
+            guard strokes.count > previousStrokeCount,
+                  let newestStroke = strokes.last else {
+                return
+            }
+
+            handwritingManager.strokeCompleted(newestStroke)
+        }
+    }
+}
