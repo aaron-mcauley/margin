@@ -30,6 +30,15 @@ struct CanvasView: UIViewRepresentable {
     func makeUIView(context: Context) -> PKCanvasView {
 
         canvasView.delegate = context.coordinator
+        
+        let underlineHoldGesture = UnderlineHoldGestureRecognizer()
+
+        underlineHoldGesture.cancelsTouchesInView = false
+        underlineHoldGesture.delegate = context.coordinator
+
+        canvasView.addGestureRecognizer(underlineHoldGesture)
+        
+        
 
         // Apple Pencil only
         canvasView.drawingPolicy = .anyInput
@@ -67,7 +76,7 @@ struct CanvasView: UIViewRepresentable {
     }
 
 
-    final class Coordinator: NSObject, PKCanvasViewDelegate {
+    final class Coordinator: NSObject, PKCanvasViewDelegate, UIGestureRecognizerDelegate {
 
         private let handwritingManager: HandwritingManager
 
@@ -77,7 +86,13 @@ struct CanvasView: UIViewRepresentable {
         init(handwritingManager: HandwritingManager) {
             self.handwritingManager = handwritingManager
         }
-
+        
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            return true
+        }
 
         func canvasViewDidEndUsingTool(
             _ canvasView: PKCanvasView
