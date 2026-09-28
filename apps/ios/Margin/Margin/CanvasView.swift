@@ -32,6 +32,15 @@ struct CanvasView: UIViewRepresentable {
         canvasView.delegate = context.coordinator
         
         let underlineHoldGesture = UnderlineHoldGestureRecognizer()
+        
+        underlineHoldGesture.onHoldRecognized = {
+        }
+        
+        underlineHoldGesture.onConfirmed = {
+        }
+        
+        underlineHoldGesture.onCancelled = {
+        }
 
         underlineHoldGesture.cancelsTouchesInView = false
         underlineHoldGesture.delegate = context.coordinator
