@@ -36,7 +36,14 @@ struct CanvasView: UIViewRepresentable {
         underlineHoldGesture.onHoldRecognized = {
         }
         
-        underlineHoldGesture.onConfirmed = {
+        underlineHoldGesture.onConfirmed = { [weak canvasView] in
+            
+            guard let canvasView else {
+                return
+            }
+            
+            context.coordinator.testSmartCrop(canvasView: canvasView)
+            
         }
         
         underlineHoldGesture.onCancelled = {
@@ -86,12 +93,14 @@ struct CanvasView: UIViewRepresentable {
 
 
     final class Coordinator: NSObject, PKCanvasViewDelegate, UIGestureRecognizerDelegate {
-
+        
         private let handwritingManager: HandwritingManager
-
+        
         private var previousStrokeCount = 0
-
-
+        private var latestStroke: PKStroke?
+        
+        
+        
         init(handwritingManager: HandwritingManager) {
             self.handwritingManager = handwritingManager
         }
@@ -102,23 +111,49 @@ struct CanvasView: UIViewRepresentable {
         ) -> Bool {
             return true
         }
-
+        
         func canvasViewDidEndUsingTool(
             _ canvasView: PKCanvasView
         ) {
-
+            
             let strokes = canvasView.drawing.strokes
-
+            
             defer {
                 previousStrokeCount = strokes.count
             }
-
+            
             guard strokes.count > previousStrokeCount,
                   let newestStroke = strokes.last else {
                 return
             }
-
+            
+            latestStroke = newestStroke
+            
             handwritingManager.strokeCompleted(newestStroke)
+        }
+        
+        func testSmartCrop(
+            canvasView: PKCanvasView
+        ) {
+            guard let underline = latestStroke else {
+                print("SMART CROP TEST: No underline available")
+                return
+            }
+            
+            let smartCropService = SmartCropService()
+            
+            guard let result = smartCropService.cropQuestion(
+                above: underline,
+                in: canvasView.drawing
+            ) else {
+                print("SMART CROP TEST: Crop failed")
+                return
+            }
+            
+            print("SMART CROP TEST: SUCCESS")
+            print("Crop bounds:", result.bounds)
+            print("Average line height:", result.averageLineHeight)
+            print("Image size:", result.image.size)
         }
     }
 }
