@@ -5,7 +5,7 @@ final class UnderlineHoldGestureRecognizer: UIGestureRecognizer {
     // MARK: - CALLBACKS
     
     var onHoldRecognized: (() -> Void)?
-    var onConfirmed: (() -> Void)?
+    var onConfirmed: ((CGRect) -> Void)?
     var onCancelled: (() -> Void)?
     
     // MARK: - TRACKING
@@ -119,7 +119,8 @@ final class UnderlineHoldGestureRecognizer: UIGestureRecognizer {
         // Locked - Pencil lifted = CONFIRM.
         if isLocked {
             
-            onConfirmed?()
+            let underlineBounds = CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+            onConfirmed?(underlineBounds)
             
             state = .recognized
             return

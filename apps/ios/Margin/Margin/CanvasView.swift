@@ -18,11 +18,12 @@ struct CanvasView: UIViewRepresentable {
 
     // Handles completed handwriting strokes
     let handwritingManager: HandwritingManager
-
+    var onCropCreated: ((UIImage) -> Void)?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
-            handwritingManager: handwritingManager
+            handwritingManager: handwritingManager,
+            onCropCreated: onCropCreated
         )
     }
 
@@ -36,14 +37,11 @@ struct CanvasView: UIViewRepresentable {
         underlineHoldGesture.onHoldRecognized = {
         }
         
-        underlineHoldGesture.onConfirmed = { [weak canvasView] in
-            
-            guard let canvasView else {
-                return
-            }
-            
-            context.coordinator.testSmartCrop(canvasView: canvasView)
-            
+        underlineHoldGesture.onConfirmed = { underlineBounds in
+
+            context.coordinator.underlineConfirmed(
+                bounds: underlineBounds
+            )
         }
         
         underlineHoldGesture.onCancelled = {
@@ -97,12 +95,22 @@ struct CanvasView: UIViewRepresentable {
         private let handwritingManager: HandwritingManager
         
         private var previousStrokeCount = 0
-        private var latestStroke: PKStroke?
+        private var pendingConfirmedUnderlineBounds: CGRect?
         
+        private let onCropCreated: ((UIImage) -> Void)?
         
-        
-        init(handwritingManager: HandwritingManager) {
+        init(handwritingManager: HandwritingManager,
+             onCropCreated: ((UIImage) -> Void)?
+        ) {
             self.handwritingManager = handwritingManager
+            self.onCropCreated = onCropCreated
+        }
+        
+        func underlineConfirmed (
+            bounds: CGRect
+        ) {
+            print("CONFIRMED BOUNDS RECEIVED:", bounds)
+            pendingConfirmedUnderlineBounds = bounds
         }
         
         func gestureRecognizer(
@@ -111,6 +119,7 @@ struct CanvasView: UIViewRepresentable {
         ) -> Bool {
             return true
         }
+        
         
         func canvasViewDidEndUsingTool(
             _ canvasView: PKCanvasView
@@ -127,18 +136,22 @@ struct CanvasView: UIViewRepresentable {
                 return
             }
             
-            latestStroke = newestStroke
-            
             handwritingManager.strokeCompleted(newestStroke)
+            
+            if pendingConfirmedUnderlineBounds != nil {
+                testSmartCrop(
+                    underline: newestStroke,
+                    canvasView: canvasView
+                )
+                
+                pendingConfirmedUnderlineBounds = nil
+            }
         }
         
         func testSmartCrop(
+            underline: PKStroke,
             canvasView: PKCanvasView
         ) {
-            guard let underline = latestStroke else {
-                print("SMART CROP TEST: No underline available")
-                return
-            }
             
             let smartCropService = SmartCropService()
             
@@ -154,6 +167,12 @@ struct CanvasView: UIViewRepresentable {
             print("Crop bounds:", result.bounds)
             print("Average line height:", result.averageLineHeight)
             print("Image size:", result.image.size)
+            UIImageWriteToSavedPhotosAlbum(
+                result.image,
+                nil,
+                nil,
+                nil
+            )
         }
     }
 }

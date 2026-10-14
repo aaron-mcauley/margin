@@ -23,6 +23,7 @@ final class SmartCropService {
     private let paddingX: CGFloat = 16
     private let paddingY: CGFloat = 8
     private let lineGap: CGFloat = 36
+    private let maxSearchDistance: CGFloat = 120
 
 
     // MARK: - Smart Crop
@@ -48,10 +49,11 @@ final class SmartCropService {
                     bounds.maxX >= underlineBounds.minX &&
                     bounds.minX <= underlineBounds.maxX
 
-                let isAboveUnderline =
-                    bounds.maxY < underlineBounds.minY
-
-                return horizontallyOverlaps && isAboveUnderline
+                let distanceAboveUnderline = underlineBounds.minY - bounds.maxY
+                
+                let isWithinSearchRegion = distanceAboveUnderline >= 0 && distanceAboveUnderline <= maxSearchDistance
+                
+                return horizontallyOverlaps && isWithinSearchRegion
             }
             .map { stroke in
 
@@ -120,12 +122,35 @@ final class SmartCropService {
 
         // Render only the selected region of the PencilKit drawing.
 
-        let image = drawing.image(
+        let drawingImage = drawing.image(
             from: cropBounds,
             scale: 2.0
         )
-
-
+        
+        let renderer = UIGraphicsImageRenderer(
+            size: drawingImage.size
+        )
+        
+        let image = renderer.image {
+            context in
+            
+            UIColor.white.setFill()
+            
+            context.fill(
+                CGRect(
+                    origin: .zero,
+                    size: drawingImage.size
+                )
+            )
+            
+            drawingImage.draw(
+                in: CGRect(
+                    origin: .zero,
+                    size: drawingImage.size
+                )
+            )
+        }
+        
         return SmartCropResult(
             image: image,
             bounds: cropBounds,

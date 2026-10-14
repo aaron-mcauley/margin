@@ -187,6 +187,7 @@ struct ContentView: View {
             }
             .padding()
         }
+        .preferredColorScheme(.light)
     }
     
     func askAi() {
