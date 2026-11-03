@@ -17,89 +17,142 @@ struct SmartCropResult {
 
 
 final class SmartCropService {
-
     // MARK: - Configuration
 
     private let paddingX: CGFloat = 16
     private let paddingY: CGFloat = 8
-    private let lineGap: CGFloat = 36
     private let maxSearchDistance: CGFloat = 120
+    
 
 
     // MARK: - Smart Crop
 
     func cropQuestion(
-        above underline: PKStroke,
+        above underline: ConfirmedUnderline,
         in drawing: PKDrawing
     ) -> SmartCropResult? {
 
-        let underlineBounds = underline.renderBounds
-
+        let underlineStroke = underline.stroke
+        let underlineBounds = underlineStroke.renderBounds
+        print("""
+        [SMARTCROP] ANALYSIS START
+        underlineIndex: \(underline.strokeIndex)
+        underlineBounds: \(underlineBounds)
+        totalDrawingStrokes: \(drawing.strokes.count)
+        """)
 
         // Find handwriting strokes that:
         // 1. Are above the underline
         // 2. Horizontally overlap the underline
 
-        let candidates = drawing.strokes
-            .filter { stroke in
-
-                let bounds = stroke.renderBounds
-
-                let horizontallyOverlaps =
-                    bounds.maxX >= underlineBounds.minX &&
-                    bounds.minX <= underlineBounds.maxX
-
-                let distanceAboveUnderline = underlineBounds.minY - bounds.maxY
-                
-                let isWithinSearchRegion = distanceAboveUnderline >= 0 && distanceAboveUnderline <= maxSearchDistance
-                
-                return horizontallyOverlaps && isWithinSearchRegion
+        let handwritingStrokes = drawing.strokes.enumerated().compactMap {
+            index, stroke -> PKStroke? in
+            
+            if index == underline.strokeIndex {
+                print("[SMARTCROP] stroke \(index) REJECTED — CONFIRMED UNDERLINE")
+                return nil
             }
-            .map { stroke in
-
-                let bounds = stroke.renderBounds
-
-                return CandidateStroke(
-                    stroke: stroke,
-                    bounds: bounds,
-                    distanceFromUnderline:
-                        underlineBounds.minY - bounds.maxY
+            
+            let bounds = stroke.renderBounds
+            
+            let horizontallyOverlaps =
+                bounds.maxX >= underlineBounds.minX &&
+                bounds.minX <= underlineBounds.maxX
+            
+            guard horizontallyOverlaps else {
+                return nil
+            }
+            
+            let verticalDistance =
+                underlineBounds.midY - bounds.midY
+            
+            guard verticalDistance > 0 else {
+                print(
+                    "[SMARTCROP] stroke \(index) REJECTED — NOT ABOVE | distance=\(verticalDistance)"
                 )
+                return nil
             }
-            .sorted {
+            
+            guard verticalDistance <= maxSearchDistance else {
+                print(
+                    "[SMARTCROP] stroke \(index) REJECTED — TOO FAR | distance=\(verticalDistance)"
+                )
+                return nil
+            }
+            
+            print(
+                "[SMARTCROP] stroke \(index) CANDIDATE | distance=\(verticalDistance) | bounds=\(bounds)"
+            )
+            
+            return stroke
+        }
+            
+        print(
+            "[SMARTCROP] CANDIDATE COUNT: \(handwritingStrokes.count)"
+        )
+        
+        guard !handwritingStrokes.isEmpty else {
+            print("SMART CROP: No handwriting candidates")
+            return nil
+
+        }
+        
+        let handwritingLines = groupIntoLines(
+            handwritingStrokes
+        )
+        
+        print(
+            "[SMARTCROP] LINE COUNT: \(handwritingLines.count)"
+        )
+
+        for (index, line) in handwritingLines.enumerated() {
+            
+            let bounds = combinedBounds(of: line)
+            
+            print("""
+            [SMARTCROP] LINE \(index)
+            strokeCount: \(line.count)
+            bounds: \(bounds)
+            """)
+        }
+        
+        let associatedLines = handwritingLines.compactMap { strokes -> HandwritingLine? in
+            
+            let bounds = combinedBounds(of: strokes)
+            
+            let verticalDistance = underlineBounds.midY - bounds.midY
+            
+            guard verticalDistance > 0, verticalDistance <= maxSearchDistance else {
+                return nil
+            }
+            
+            return HandwritingLine( strokes: strokes, bounds: bounds, distanceFromUnderline: verticalDistance)
+        }
+        
+        guard let selectedLine = associatedLines.min(
+            by: {
                 $0.distanceFromUnderline < $1.distanceFromUnderline
             }
-
-
-        guard let nearest = candidates.first else {
-            print("SMART CROP: No handwriting found above underline")
+        ) else {
+            print("SMART CROP: No associated handwriting line")
             return nil
         }
-
-
-        // Find strokes that appear to belong to the
-        // same handwritten line as the nearest stroke.
-
-        let questionStrokes = candidates.filter { candidate in
-
-            abs(
-                candidate.bounds.maxY -
-                nearest.bounds.maxY
-            ) <= lineGap
-        }
-
-
-        guard !questionStrokes.isEmpty else {
-            return nil
-        }
-
+        
+        let questionStrokes = selectedLine.strokes
+    
+        print("""
+        [SMARTCROP] LINE SELECTED
+        strokeCount: \(selectedLine.strokes.count)
+        bounds: \(selectedLine.bounds)
+        distanceFromUnderline: \(selectedLine.distanceFromUnderline)
+        """)
 
         // Combine all question stroke bounds.
 
-        var questionBounds = questionStrokes[0].bounds
+        var questionBounds = questionStrokes[0].renderBounds
 
-        for candidate in questionStrokes.dropFirst() {
-            questionBounds = questionBounds.union(candidate.bounds)
+        for stroke in questionStrokes.dropFirst() {
+            questionBounds = questionBounds.union(stroke.renderBounds)
         }
 
 
@@ -116,7 +169,7 @@ final class SmartCropService {
         // Calculate average handwriting height.
 
         let averageLineHeight = getAverageLineHeight(
-            questionStrokes.map { $0.stroke }
+            questionStrokes
         )
 
 
@@ -158,6 +211,52 @@ final class SmartCropService {
         )
     }
 
+        
+    private func groupIntoLines (
+        _ strokes: [PKStroke]
+    ) -> [[PKStroke]] {
+        let sortedStrokes = strokes.sorted {
+            $0.renderBounds.midY < $1.renderBounds.midY
+        }
+        
+        var lines: [[PKStroke]] = []
+        
+        for stroke in sortedStrokes {
+            let strokeBounds = stroke.renderBounds
+            
+            if let lineIndex =  lines.firstIndex(where: { line in
+            
+                let lineBounds = combinedBounds(of: line)
+                
+                let verticalOverlap = min(lineBounds.maxY, strokeBounds.maxY) - max(lineBounds.minY, strokeBounds.minY)
+                
+                if verticalOverlap >= 0 {
+                    return true
+                }
+                
+                let verticalGap = max( strokeBounds.minY - lineBounds.maxY, lineBounds.minY - strokeBounds.maxY )
+                
+                let referenceHeight = max( lineBounds.height, strokeBounds.height )
+                
+                return verticalGap <= referenceHeight * 0.5
+            }) {
+                lines[lineIndex].append(stroke)
+            } else {
+                lines.append([stroke])
+            }
+        }
+            return lines
+    }
+        
+        private func combinedBounds( of strokes: [PKStroke]) -> CGRect {
+            guard let firstStroke = strokes.first else {
+                return .null
+            }
+            
+            return strokes.dropFirst().reduce(firstStroke.renderBounds) { bounds, stroke in
+                bounds.union(stroke.renderBounds)
+            }
+        }
 
     // MARK: - Average Line Height
 
@@ -193,9 +292,9 @@ final class SmartCropService {
 
 // MARK: - Internal Model
 
-private struct CandidateStroke {
+private struct HandwritingLine {
 
-    let stroke: PKStroke
+    let strokes: [PKStroke]
     let bounds: CGRect
     let distanceFromUnderline: CGFloat
 }
