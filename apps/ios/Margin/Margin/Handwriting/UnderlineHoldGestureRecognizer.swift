@@ -15,26 +15,22 @@ final class UnderlineHoldGestureRecognizer: UIGestureRecognizer {
     private var maxX: CGFloat = 0
     private var minY: CGFloat = 0
     private var maxY: CGFloat = 0
-    private var holdStartTime: TimeInterval?
     private var longestHoldTime: TimeInterval = 0
     private var timerResetCount: Int = 0
-    private var lastMovementPoint: CGPoint = .zero
+    private var holdAnchorPoint: CGPoint = .zero
+    private var holdStartTime: TimeInterval?
     private var lockedPoint: CGPoint = .zero
     private var isUnderlineCandidate = false
-    private var previousPoint: CGPoint = .zero
-    private var previousTimestamp: TimeInterval = 0
-    private let movementVeloThreshold: CGFloat = 400
-    private let stationaryVeloThreshold: CGFloat = 200
-    
-    
     private var isLocked = false
     
     // MARK: - Configuration
     
     private let holdDuration: TimeInterval = 1.25
-    
     private let minimumUnderlineWidth: CGFloat = 100
     private let maximumUnderlineHeight: CGFloat = 40
+    
+    // Small movement allowed while acquiring the hold.
+    private let stationaryTolerance: CGFloat = 5
     
     // Once locked, user must diliberately move this far to cancel
     private let cancellationDistance: CGFloat = 15
@@ -59,9 +55,9 @@ final class UnderlineHoldGestureRecognizer: UIGestureRecognizer {
         minY = point.y
         maxY = point.y
         
-        lastMovementPoint = point
-        previousPoint = point
-        previousTimestamp = touch.timestamp
+        holdAnchorPoint = point
+        
+        print("[UNDERLINE] TOUCH BEGAN")
 
     }
     
@@ -78,12 +74,17 @@ final class UnderlineHoldGestureRecognizer: UIGestureRecognizer {
         // ALREADY LOCKED
         
         if isLocked {
-            let distance = distanceBetween(
+            let distanceFromLock = distanceBetween(
                 point,
                 lockedPoint
             )
             
-            if distance > cancellationDistance {
+            if distanceFromLock > cancellationDistance {
+                
+                print(
+                    "[UNDERLINE] LOCK CANCELLED | movement:",
+                    distanceFromLock
+                    )
                 cancelLockedGesture()
             }
             
@@ -99,41 +100,46 @@ final class UnderlineHoldGestureRecognizer: UIGestureRecognizer {
         
         let width = maxX - minX
         let height = maxY - minY
-        let currentTimestamp = touch.timestamp
-        let timeDelta = currentTimestamp - previousTimestamp
-        let sampleDistance = distanceBetween(
-            point,
-            previousPoint
-        )
         
-        previousPoint = point
-        previousTimestamp = currentTimestamp
+        let looksLikeUnderline = width >= minimumUnderlineWidth && height <= maximumUnderlineHeight
         
-        
-        
-        let velocity = timeDelta > 0 ? sampleDistance / timeDelta : 0
-
-     
-        let looksLikeUnderline =
-            width >= minimumUnderlineWidth &&
-            height <= maximumUnderlineHeight
-
-  
-        
-        // Always remember whether the CURRENT stroke geometry
-        // still qualifies as an underline.
         isUnderlineCandidate = looksLikeUnderline
-
-        // Tiny Pencil jitter does not count as meaningful movement.
-        // If a hold timer is already running, leave it alone.
         
-        if velocity > movementVeloThreshold {
-            lastMovementPoint = point
+        // It isn't underline-shaped yet
+        
+        if !looksLikeUnderline {
             cancelHoldTimer()
             return
         }
         
-        if isUnderlineCandidate && velocity < stationaryVeloThreshold{
+        // MARK: Hold Acqusition
+        
+        // First moment the stroke becomes a valid underline
+        if holdTimer == nil {
+            holdAnchorPoint = point
+
+            print(
+                "[UNDERLINE] HOLD WINDOW STARTED",
+                "| width:", width,
+                "| height:", height
+            )
+            
+            startHoldTimer()
+            return
+        }
+        
+        let movementFromAnchor = distanceBetween(point, holdAnchorPoint)
+        
+        // User is still drawing.
+        // Move the anchor forward and restart the stationary window
+        
+        if movementFromAnchor > stationaryTolerance {
+            print(
+                    "[UNDERLINE] HOLD WINDOW RESET",
+                    "| movement:", movementFromAnchor
+                )
+            cancelHoldTimer()
+            holdAnchorPoint = point
             startHoldTimer()
         }
     }
@@ -203,13 +209,13 @@ final class UnderlineHoldGestureRecognizer: UIGestureRecognizer {
         holdStartTime = nil
         longestHoldTime = 0
         timerResetCount = 0
+        holdAnchorPoint = .zero
         
         minX = 0
         maxX = 0
         minY = 0
         maxY = 0
         
-        lastMovementPoint = .zero
         lockedPoint = .zero
     }
     
@@ -273,20 +279,24 @@ final class UnderlineHoldGestureRecognizer: UIGestureRecognizer {
         }
         
         isLocked = true
-        lockedPoint = lastMovementPoint
+        lockedPoint = holdAnchorPoint
                 
         // turn underline blue here
         
+        print(
+            "[UNDERLINE] LOCKED",
+            "| hold:", String(format: "%.2f", longestHoldTime), "sec"
+        )
+        
         onHoldRecognized?()
-            }
+        }
     
     private func cancelLockedGesture() {
         guard isLocked else {
             return
         }
-        
+                
         isLocked = false
-    
         cancelHoldTimer()
                 
         // remove blue uunderline here

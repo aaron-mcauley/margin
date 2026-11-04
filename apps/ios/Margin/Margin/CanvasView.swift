@@ -95,7 +95,7 @@ struct CanvasView: UIViewRepresentable {
         private let handwritingManager: HandwritingManager
         private var previousStrokeCount = 0
         private var pendingUnderlineGestureBounds: CGRect?
-        
+        private var pendingUnderlineAfterStrokeIndex: Int?
         private let onCropCreated: ((UIImage) -> Void)?
         
         init(handwritingManager: HandwritingManager,
@@ -105,10 +105,18 @@ struct CanvasView: UIViewRepresentable {
             self.onCropCreated = onCropCreated
         }
         
-        func underlineConfirmed (
+        func underlineConfirmed(
             bounds: CGRect
         ) {
             pendingUnderlineGestureBounds = bounds
+            pendingUnderlineAfterStrokeIndex = previousStrokeCount - 1
+
+            print("\n[CANVAS] UNDERLINE CONFIRMATION RECEIVED")
+            print("gestureBounds:", bounds)
+            print(
+                "lastKnownStrokeIndex:",
+                pendingUnderlineAfterStrokeIndex ?? -1
+            )
         }
         
         func gestureRecognizer(
@@ -122,37 +130,86 @@ struct CanvasView: UIViewRepresentable {
         func canvasViewDidEndUsingTool(
             _ canvasView: PKCanvasView
         ) {
-            
             let strokes = canvasView.drawing.strokes
-            
+
+            print("\n[CANVAS] DID END USING TOOL")
+            print("previousStrokeCount:", previousStrokeCount)
+            print("currentStrokeCount:", strokes.count)
+            print(
+                "pendingUnderline:",
+                pendingUnderlineGestureBounds != nil
+            )
+
             defer {
                 previousStrokeCount = strokes.count
+
+                print("[CANVAS] STROKE COUNT UPDATED")
+                print("previousStrokeCount:", previousStrokeCount)
             }
-            
-            guard strokes.count > previousStrokeCount,
-                  let newestStroke = strokes.last else {
+
+            guard strokes.count > previousStrokeCount else {
+                print("[CANVAS] NO NEW STROKE — EXITING")
                 return
             }
-            
-            handwritingManager.strokeCompleted(newestStroke)
-            
-            if let gestureBounds = pendingUnderlineGestureBounds {
-               pendingUnderlineGestureBounds = nil
-                
-                guard underlineStrokeMatches (
-                    stroke: newestStroke,
+
+            // Process EVERY stroke PencilKit has committed since
+            // the previous callback instead of assuming strokes.last
+            // is the stroke we're interested in.
+            let newStrokeIndices = previousStrokeCount..<strokes.count
+
+            for index in newStrokeIndices {
+
+                let stroke = strokes[index]
+
+                print("\n[CANVAS] NEW STROKE")
+                print("index:", index)
+                print("bounds:", stroke.renderBounds)
+                print("width:", stroke.renderBounds.width)
+                print("height:", stroke.renderBounds.height)
+
+                handwritingManager.strokeCompleted(stroke)
+
+                guard let gestureBounds = pendingUnderlineGestureBounds else {
+                    print(
+                        "[CANVAS] NO PENDING UNDERLINE — NORMAL HANDWRITING"
+                    )
+                    continue
+                }
+
+                print("[CANVAS] PENDING UNDERLINE EXISTS")
+                print("gestureBounds:", gestureBounds)
+                print("candidateStrokeBounds:", stroke.renderBounds)
+
+                guard underlineStrokeMatches(
+                    stroke: stroke,
                     gestureBounds: gestureBounds
                 ) else {
-                print("UNDERLINE MATCH FAILED")
-                return
-            }
-            
-            let confirmedUnderline = ConfirmedUnderline(
-                stroke: newestStroke,
-                gestureBounds: gestureBounds
-            )
-                
-            Task {
+                    // IMPORTANT:
+                    // Do NOT clear pendingUnderlineGestureBounds here.
+                    //
+                    // This stroke isn't the confirmed underline.
+                    // PencilKit may commit the actual underline later.
+                    print(
+                        "[CANVAS] CANDIDATE DID NOT MATCH — KEEPING PENDING UNDERLINE"
+                    )
+
+                    continue
+                }
+
+                print("[CANVAS] UNDERLINE STROKE MATCHED")
+                print("matchedStrokeIndex:", index)
+
+                // NOW we've actually identified the PKStroke corresponding
+                // to the confirmed gesture. Only now consume the pending state.
+                pendingUnderlineGestureBounds = nil
+
+                let confirmedUnderline = ConfirmedUnderline(
+                    stroke: stroke,
+                    strokeIndex: index,
+                    gestureBounds: gestureBounds
+                )
+
+                Task {
                     await testSmartCrop(
                         underline: confirmedUnderline,
                         canvasView: canvasView
@@ -161,33 +218,91 @@ struct CanvasView: UIViewRepresentable {
             }
         }
         
-        private func underlineStrokeMatches (
+        private func underlineStrokeMatches(
             stroke: PKStroke,
             gestureBounds: CGRect
         ) -> Bool {
+
             let strokeBounds = stroke.renderBounds
-            
-            let intersection = strokeBounds.intersection(gestureBounds)
-            
-            guard !intersection.isNull else {
+
+            print("[MATCH] START")
+            print("gestureBounds:", gestureBounds)
+            print("strokeBounds:", strokeBounds)
+
+            // MARK: Horizontal overlap
+
+            let horizontalIntersection =
+                min(strokeBounds.maxX, gestureBounds.maxX) -
+                max(strokeBounds.minX, gestureBounds.minX)
+
+            guard horizontalIntersection > 0 else {
+                print("[MATCH] FAILED — NO HORIZONTAL OVERLAP")
                 return false
             }
-            
-            let strokeArea = strokeBounds.width * strokeBounds.height
-            let intersectionArea = intersection.width * intersection.height
-            
-            guard strokeArea > 0 else {
+
+            let shorterWidth = min(
+                strokeBounds.width,
+                gestureBounds.width
+            )
+
+            guard shorterWidth > 0 else {
+                print("[MATCH] FAILED — INVALID WIDTH")
                 return false
             }
-            
-            let overlapRatio = intersectionArea / strokeArea
-            
-            return overlapRatio >= 0.7
+
+            let horizontalOverlapRatio =
+                horizontalIntersection / shorterWidth
+
+            // MARK: Vertical center
+
+            let verticalCenterDistance = abs(
+                strokeBounds.midY - gestureBounds.midY
+            )
+
+            // PencilKit renderBounds includes ink thickness,
+            // so compare centers rather than rectangle area.
+            let verticalTolerance = max(
+                strokeBounds.height,
+                gestureBounds.height
+            )
+
+            // MARK: Width similarity
+
+            let widthRatio =
+                min(strokeBounds.width, gestureBounds.width) /
+                max(strokeBounds.width, gestureBounds.width)
+
+            print("[MATCH] METRICS")
+            print("horizontalOverlapRatio:", horizontalOverlapRatio)
+            print("verticalCenterDistance:", verticalCenterDistance)
+            print("verticalTolerance:", verticalTolerance)
+            print("widthRatio:", widthRatio)
+
+            let matches =
+                horizontalOverlapRatio >= 0.9 &&
+                verticalCenterDistance <= verticalTolerance &&
+                widthRatio >= 0.8
+
+            print(
+                matches
+                    ? "[MATCH] PASSED"
+                    : "[MATCH] FAILED — IDENTITY CHECK"
+            )
+
+            return matches
         }
         func testSmartCrop(
             underline: ConfirmedUnderline,
             canvasView: PKCanvasView
         ) async {
+            
+            print("""
+            
+            [SMARTCROP] REQUEST STARTED
+            underlineIndex: \(underline.strokeIndex)
+            underlineBounds: \(underline.stroke.renderBounds)
+            drawingStrokeCount: \(canvasView.drawing.strokes.count)
+            """)
             
             let smartCropService = SmartCropService()
             
@@ -195,14 +310,18 @@ struct CanvasView: UIViewRepresentable {
                 above: underline,
                 in: canvasView.drawing
             ) else {
-               // print("SMART CROP TEST: Crop failed")
+                print("[SMARTCROP] FAILED — NO CROP RETURNED")
                 return
             }
             
-            //print("SMART CROP TEST: SUCCESS")
-            //print("Crop bounds:", result.bounds)
-            //print("Average line height:", result.averageLineHeight)
-            //print("Image size:", result.image.size)
+            print("""
+            [SMARTCROP] SUCCESS
+            cropBounds: \(result.bounds)
+            averageLineHeight: \(result.averageLineHeight)
+            imageSize: \(result.image.size)
+            """)
+            
+            print("[OCR] STARTED")
             
             do {
                 let ocrService = VisionOCRService()
@@ -211,10 +330,19 @@ struct CanvasView: UIViewRepresentable {
                     from: result.image
                 )
                 
-                print("OCR RESULT:")
-                print(recognizedText)
+                print("""
+                [OCR] SUCCESS
+                result: \(recognizedText)
+                
+                """)
+                
             } catch {
-                print("OCR FAILED:", error)
+                
+                print("""
+                [OCR] FAILED
+                error: \(error)
+                
+                """)
             }
         }
     }
