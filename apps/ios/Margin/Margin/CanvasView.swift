@@ -141,22 +141,32 @@ struct CanvasView: UIViewRepresentable {
         
         private func removeConfirmedUnderline(_ underline: ConfirmedUnderline, from canvasView: PKCanvasView
         ) {
-            var strokes = canvasView.drawing.strokes
-            var index = underline.strokeIndex
+            let targetIndex = underline.strokeIndex
             
-            guard strokes.indices.contains(index) else {
-                print("[CANVAS] UNDERLINE REMOVAL FAILED")
-                return
+            DispatchQueue.main.async { [weak self, weak canvasView] in
+            
+                guard let self, let canvasView else { return }
+                var strokes = canvasView.drawing.strokes
+                
+                guard strokes.indices.contains(targetIndex) else {
+                    print("[CANVAS] UNDERLINE REMOVAL FAILED - INVALID INDEX")
+                    return
+                }
+                
+                // Verify we're still targeting the confirmed underline
+                
+                guard strokes[targetIndex].renderBounds == underline.stroke.renderBounds else {
+                    print("[CANVAS] UNDERLINE REMOVAL FAILED - STROKE CHANGED")
+                    return
+                }
+                
+                strokes.remove(at: targetIndex)
+                
+                self.previousStrokeCount = strokes.count
+                canvasView.drawing = PKDrawing(strokes: strokes)
+                
+                print("[CANVAS] CONFIRMED UNDERLINE REMOVED")
             }
-            
-            strokes.remove(at: index)
-            
-            // Keep our stroke tracking synchronized
-            previousStrokeCount = strokes.count
-            
-            canvasView.drawing = PKDrawing(strokes: strokes)
-            
-            print("[CANVAS] CONFIRMED UNDERLINE REMOVED")
         }
         
         func showUnderlineFeedback(points: [CGPoint]) {
