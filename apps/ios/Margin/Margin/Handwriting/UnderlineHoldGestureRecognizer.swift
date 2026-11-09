@@ -4,7 +4,7 @@ final class UnderlineHoldGestureRecognizer: UIGestureRecognizer {
     
     // MARK: - CALLBACKS
     
-    var onHoldRecognized: (() -> Void)?
+    var onHoldRecognized: ((CGRect, [CGPoint]) -> Void)?
     var onConfirmed: ((CGRect) -> Void)?
     var onCancelled: (() -> Void)?
     
@@ -22,6 +22,8 @@ final class UnderlineHoldGestureRecognizer: UIGestureRecognizer {
     private var lockedPoint: CGPoint = .zero
     private var isUnderlineCandidate = false
     private var isLocked = false
+    private var underlinePoints: [CGPoint] = []
+    
     
     // MARK: - Configuration
     
@@ -49,6 +51,9 @@ final class UnderlineHoldGestureRecognizer: UIGestureRecognizer {
         }
         
         let point = touch.location(in: view)
+        underlinePoints = [point]
+        
+        // Capture the actual Pencil movement, including coalesed touch samples for a smoother path
         
         minX = point.x
         maxX = point.x
@@ -70,6 +75,20 @@ final class UnderlineHoldGestureRecognizer: UIGestureRecognizer {
         }
         
         let point = touch.location(in: view)
+        
+        // Capture the actual Pencil movement, including
+        // coalesced touch samples for a smoother path.
+        if !isLocked {
+            let samples = event.coalescedTouches(for: touch) ??         [touch]
+            
+            for sample in samples {
+                let samplePoint = sample.location(in: view)
+                                    
+                if underlinePoints.last != samplePoint {
+                    underlinePoints.append(samplePoint)
+                    }
+            }
+        }
         
         // ALREADY LOCKED
         
@@ -205,6 +224,7 @@ final class UnderlineHoldGestureRecognizer: UIGestureRecognizer {
         
         isLocked = false
         isUnderlineCandidate = false
+        underlinePoints.removeAll()
         
         holdStartTime = nil
         longestHoldTime = 0
@@ -283,12 +303,23 @@ final class UnderlineHoldGestureRecognizer: UIGestureRecognizer {
                 
         // turn underline blue here
         
-        print(
-            "[UNDERLINE] LOCKED",
-            "| hold:", String(format: "%.2f", longestHoldTime), "sec"
+        let underlineBounds = CGRect (
+            x: minX,
+            y: minY,
+            width: maxX - minX,
+            height: maxY - minY
         )
         
-        onHoldRecognized?()
+        print(
+                "[UNDERLINE] LOCKED",
+                "| hold:",
+                String(format: "%.2f", longestHoldTime),
+                "sec",
+                "| points:",
+                underlinePoints.count
+            )
+        
+        onHoldRecognized?(underlineBounds, underlinePoints)
         }
     
     private func cancelLockedGesture() {
