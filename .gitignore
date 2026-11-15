@@ -25,3 +25,7 @@ dist-ssr
 
 # Environment Variables
 **/.env
+
+# Xcode user-specific settings
+xcuserdata/
+*.xcuserstate
