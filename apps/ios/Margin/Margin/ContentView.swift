@@ -13,16 +13,9 @@ struct ContentView: View {
     
     @State private var canvasView = PKCanvasView()
     @State private var statusText = "Ready"
-    @State private var isSelecting = false
-    @State private var lassoPoints: [CGPoint] = []
-    @State private var lassoClosed = false
-    @State private var selectionRect: CGRect = .zero
     @State private var annotations: [AIAnnotation] = []
     @State private var isEraser = false
-    @State private var resizeStartWidth: CGFloat = 320
-    @State private var cropPreview: UIImage?
-
-
+    
     struct AIAnnotation: Identifiable {
         let id = UUID()
         var text: String
@@ -35,66 +28,22 @@ struct ContentView: View {
         ZStack {
             LegalPadBackground()
                 .ignoresSafeArea()
-
+            
             CanvasView(canvasView: $canvasView,
-                isEraser: isEraser,
+                       isEraser: isEraser,
                        handwritingManager: handwritingManager
             )
             .ignoresSafeArea()
-
-            if isSelecting {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .ignoresSafeArea()
-                    .gesture(
-                        DragGesture(
-                            minimumDistance: 0,
-                            coordinateSpace: .named("page")
-                                   )
-                            .onChanged { value in
-                                lassoPoints.append(value.location)
-                            }
-                            .onEnded { _ in
-                                lassoClosed = true
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                                    isSelecting = false
-                                    finishLasso()
-                                }
-                            }
-                    )
-
-                Path { path in
-                    guard let firstPoint = lassoPoints.first else { return }
-
-                    path.move(to: firstPoint)
-
-                    for point in lassoPoints.dropFirst() {
-                        path.addLine(to: point)
-                    }
-
-                    if lassoClosed {
-                        path.closeSubpath()
-                    }
-                }
-                .stroke(
-                    Color.blue,
-                    style: StrokeStyle(
-                        lineWidth: 3,
-                        dash: [8, 5]
-                    )
-                )
-                .ignoresSafeArea()
-            }
-
+            
             ForEach($annotations) { $annotation in
                 ZStack(alignment: .topTrailing) {
-
+                    
                     Text(annotation.text)
                         .font(.system(size: 16))
                         .foregroundColor(.black)
                         .multilineTextAlignment(.leading)
                         .frame(width: annotation.width, alignment: .leading)
-
+                    
                     Button {
                         annotations.removeAll { $0.id == annotation.id }
                     } label: {
@@ -113,7 +62,7 @@ struct ContentView: View {
                         }
                 )
             }
-
+            
             .coordinateSpace(name: "page")
             VStack {
                 HStack {
@@ -156,25 +105,6 @@ struct ContentView: View {
                             )
                             .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
-                    
-                    Button {
-                        isSelecting.toggle()
-                        lassoPoints.removeAll()
-                        lassoClosed = false
-                        statusText = isSelecting ? "Circle a question" : "Ready"
-                    } label: {
-                        Image(systemName: "sparkles")
-                            .foregroundColor(isSelecting ? .white : .black)
-                            .padding(10)
-                            .background(
-                                isSelecting ? Color.black : Color.clear
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(Color.black, lineWidth: 1)
-                            )
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                    }
                 }
                 
                 Spacer()
@@ -189,132 +119,8 @@ struct ContentView: View {
         }
         .preferredColorScheme(.light)
     }
-    
-    func askAi() {
-        let fullImage = canvasView.drawing.image(
-            from: canvasView.bounds,
-            scale: UIScreen.main.scale
-        )
-
-        guard selectionRect.width > 0,
-              selectionRect.height > 0 else {
-            statusText = "No valid selection"
-            return
-        }
-
-        let scale = UIScreen.main.scale
-
-        let cropRect = CGRect(
-            x: selectionRect.origin.x * scale,
-            y: selectionRect.origin.y * scale,
-            width: selectionRect.width * scale,
-            height: selectionRect.height * scale
-        )
-
-        guard let cgImage = fullImage.cgImage?.cropping(to: cropRect) else {
-            statusText = "Crop failed"
-            return
-        }
-
-        let croppedImage = UIImage(cgImage: cgImage)
-
-        statusText = "Thinking..."
-
-        Task {
-            do {
-                print("Sending image to OpenAI...")
-
-                let response = try await AIService()
-                    .imageInquiry(croppedImage)
-
-                await MainActor.run {
-
-                    let newAnnotation = AIAnnotation(
-                        text: response,
-                        position: CGPoint(
-                            x: selectionRect.minX + (max(selectionRect.width, 260) / 2),
-                            y: selectionRect.maxY + 3
-                        ),
-                        opacity: 0,
-                        width: max(selectionRect.width, 260)
-                    )
-
-                    annotations.append(newAnnotation)
-
-                    let newIndex = annotations.count - 1
-
-                    withAnimation(.easeInOut(duration: 1.0)) {
-                        annotations[newIndex].opacity = 1.0
-                    }
-
-                    statusText = "Answer ready"
-                }
-
-            } catch {
-                await MainActor.run {
-                    statusText = "OpenAI Error"
-                    print(error)
-                }
-            }
-        }
-    }
-    
-    /*
-    func askAi() {
-        statusText = "Thinking..."
-
-        let fakeResponse = """
-        SB 1383 requires California cities and counties to reduce organic waste disposal, expand food recovery programs, provide organics collection, conduct outreach, monitor compliance, and report progress. In simple terms, local governments must help divert food and green waste from landfills to reduce methane emissions.
-        """
-
-        let newAnnotation = AIAnnotation(
-            text: fakeResponse,
-            position: CGPoint(
-                x: selectionRect.midX,
-                y: selectionRect.maxY + 60
-            ),
-            opacity: 0,
-            width: max(selectionRect.width, 260)
-        )
-
-        annotations.append(newAnnotation)
-
-        let newIndex = annotations.count - 1
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-
-            withAnimation(.easeInOut(duration: 1.0)) {
-                annotations[newIndex].opacity = 1.0
-            }
-
-            statusText = "Answer ready"
-        }
-    }
-    */
-    func finishLasso() {
-        guard !lassoPoints.isEmpty else {
-            statusText = "No selection"
-            return
-        }
-
-        let minX = lassoPoints.map { $0.x }.min() ?? 0
-        let maxX = lassoPoints.map { $0.x }.max() ?? 0
-        let minY = lassoPoints.map { $0.y }.min() ?? 0
-        let maxY = lassoPoints.map { $0.y }.max() ?? 0
-
-        selectionRect = CGRect(
-            x: minX,
-            y: minY,
-            width: maxX - minX,
-            height: maxY - minY
-        )
-
-        statusText = "Selected: \(Int(selectionRect.width)) x \(Int(selectionRect.height))"
-
-
-        askAi()
-    }
 }
+  
 
 #Preview {
     ContentView()
