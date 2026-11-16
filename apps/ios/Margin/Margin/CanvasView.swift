@@ -18,12 +18,12 @@ struct CanvasView: UIViewRepresentable {
     
     // Handles completed handwriting strokes
     let handwritingManager: HandwritingManager
-    var onCropCreated: ((UIImage) -> Void)?
+    var onTextRecognized: ((String) -> Void)?
     
     func makeCoordinator() -> Coordinator {
         Coordinator(
             handwritingManager: handwritingManager,
-            onCropCreated: onCropCreated
+            onTextRecognized: onTextRecognized
         )
     }
     
@@ -115,23 +115,24 @@ struct CanvasView: UIViewRepresentable {
         canvasView.tool = isEraser
             ? PKEraserTool(.vector)
             : PKInkingTool(.pen, color: .black, width: 3)
+        context.coordinator.updateCallback(onTextRecognized)
     }
     
     
     final class Coordinator: NSObject, PKCanvasViewDelegate, UIGestureRecognizerDelegate {
     
         init(handwritingManager: HandwritingManager,
-             onCropCreated: ((UIImage) -> Void)?
+             onTextRecognized: ((String) -> Void)?
         ) {
             self.handwritingManager = handwritingManager
-            self.onCropCreated = onCropCreated
+            self.onTextRecognized = onTextRecognized
         }
         
         var underlineOverlay: UnderlineFeedbackOverlay?
         private let handwritingManager: HandwritingManager
         private var previousStrokeCount = 0
         private var pendingUnderlines: [PendingUnderline] = []
-        private let onCropCreated: ((UIImage) -> Void)?
+        private var onTextRecognized: ((String) -> Void)?
         
         private struct PendingUnderline {
             let id: UUID
@@ -167,6 +168,10 @@ struct CanvasView: UIViewRepresentable {
                 
                 print("[CANVAS] CONFIRMED UNDERLINE REMOVED")
             }
+        }
+        
+        func updateCallback(_ callback: ((String) -> Void)?) {
+            onTextRecognized = callback
         }
         
         func showUnderlineFeedback(points: [CGPoint]) {
@@ -421,6 +426,8 @@ struct CanvasView: UIViewRepresentable {
                 let recognizedText = try await ocrService.recognizeText(
                     from: result.image
                 )
+                onTextRecognized?(recognizedText)
+
                 
                 print("""
                 [OCR] SUCCESS
@@ -436,6 +443,7 @@ struct CanvasView: UIViewRepresentable {
                 
                 """)
             }
+            
         }
     }
 }

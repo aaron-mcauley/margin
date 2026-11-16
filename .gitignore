@@ -29,3 +29,6 @@ dist-ssr
 # Xcode user-specific settings
 xcuserdata/
 *.xcuserstate
+
+.stfolder/
+.stignore

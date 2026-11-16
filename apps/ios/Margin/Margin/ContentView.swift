@@ -3,7 +3,7 @@
 //  Margin
 //
 //  Created by Triz on 6/15/26.
-//
+// 
 
 import SwiftUI
 import PencilKit
@@ -31,7 +31,10 @@ struct ContentView: View {
             
             CanvasView(canvasView: $canvasView,
                        isEraser: isEraser,
-                       handwritingManager: handwritingManager
+                       handwritingManager: handwritingManager,
+                       onTextRecognized: { recognizedText in
+                    statusText = "Recognized: \(recognizedText)"
+                }
             )
             .ignoresSafeArea()
             
