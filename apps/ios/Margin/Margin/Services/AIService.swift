@@ -8,7 +8,7 @@
 import Foundation
 
 struct AIService {
-    private let baseURL = "http://localhost:3001"
+    private let baseURL = "http://192.168.1.142:3001"
     
     func ask(_ question: String) async throws -> String {
         

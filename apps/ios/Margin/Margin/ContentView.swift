@@ -29,15 +29,26 @@ struct ContentView: View {
             LegalPadBackground()
                 .ignoresSafeArea()
             
-            CanvasView(canvasView: $canvasView,
-                       isEraser: isEraser,
-                       handwritingManager: handwritingManager,
-                       onTextRecognized: { recognizedText in
-                    statusText = "Recognized: \(recognizedText)"
+            CanvasView(canvasView: $canvasView, isEraser: isEraser, handwritingManager: handwritingManager, onTextRecognized: {
+                recognizedText in statusText = "Thinking..."
+                
+                Task {
+                    do {
+                        let answer = try await AIService().ask(recognizedText)
+                        
+                        await MainActor.run {
+                            statusText = "Answer recieved"
+                            print("[AI] RESPONSE: \(answer)")
+                        }
+                    }   catch {
+                        await MainActor.run {
+                            statusText = "AI request failed"
+                            print("[AI] ERROR: \(error)")
+                        }
+                    }
                 }
-            )
-            .ignoresSafeArea()
-            
+            })
+                       
             ForEach($annotations) { $annotation in
                 ZStack(alignment: .topTrailing) {
                     
