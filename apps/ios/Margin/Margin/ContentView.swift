@@ -30,7 +30,7 @@ struct ContentView: View {
                 .ignoresSafeArea()
             
             CanvasView(canvasView: $canvasView, isEraser: isEraser, handwritingManager: handwritingManager, onTextRecognized: {
-                recognizedText in statusText = "Thinking..."
+                recognizedText, answerPosition in statusText = "Thinking..."
                 
                 Task {
                     do {
@@ -38,6 +38,13 @@ struct ContentView: View {
                         
                         await MainActor.run {
                             statusText = "Answer recieved"
+                            
+                            annotations.append(
+                                AIAnnotation(
+                                    text: answer,
+                                    position: answerPosition
+                                )
+                            )
                             print("[AI] RESPONSE: \(answer)")
                         }
                     }   catch {

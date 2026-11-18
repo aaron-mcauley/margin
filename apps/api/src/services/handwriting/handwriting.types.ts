@@ -6,6 +6,8 @@ export type Stroke = {
     type: "ink" | "underline";
     width: number;
     color: string;
+    characterIndex?: number;
+    character?: string;
 };
 
 export type HandwritingPlacement = {

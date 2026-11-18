@@ -18,7 +18,7 @@ struct CanvasView: UIViewRepresentable {
     
     // Handles completed handwriting strokes
     let handwritingManager: HandwritingManager
-    var onTextRecognized: ((String) -> Void)?
+    var onTextRecognized: ((String, CGPoint) -> Void)?
     
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -122,7 +122,7 @@ struct CanvasView: UIViewRepresentable {
     final class Coordinator: NSObject, PKCanvasViewDelegate, UIGestureRecognizerDelegate {
     
         init(handwritingManager: HandwritingManager,
-             onTextRecognized: ((String) -> Void)?
+             onTextRecognized: ((String, CGPoint) -> Void)?
         ) {
             self.handwritingManager = handwritingManager
             self.onTextRecognized = onTextRecognized
@@ -132,7 +132,7 @@ struct CanvasView: UIViewRepresentable {
         private let handwritingManager: HandwritingManager
         private var previousStrokeCount = 0
         private var pendingUnderlines: [PendingUnderline] = []
-        private var onTextRecognized: ((String) -> Void)?
+        private var onTextRecognized: ((String, CGPoint) -> Void)?
         
         private struct PendingUnderline {
             let id: UUID
@@ -170,7 +170,7 @@ struct CanvasView: UIViewRepresentable {
             }
         }
         
-        func updateCallback(_ callback: ((String) -> Void)?) {
+        func updateCallback(_ callback: ((String, CGPoint) -> Void)?) {
             onTextRecognized = callback
         }
         
@@ -426,7 +426,19 @@ struct CanvasView: UIViewRepresentable {
                 let recognizedText = try await ocrService.recognizeText(
                     from: result.image
                 )
-                onTextRecognized?(recognizedText)
+                let underlineBounds = underline.stroke.renderBounds
+                
+                let answerPosition = CGPoint(
+                    x: underlineBounds.midX,
+                    y: underlineBounds.maxY + 60
+                )
+                
+                let visiblePosition = canvasView.convert(
+                    answerPosition,
+                    to: canvasView.superview
+                )
+                
+                onTextRecognized?(recognizedText, visiblePosition)
 
                 
                 print("""

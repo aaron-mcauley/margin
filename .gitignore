@@ -32,3 +32,6 @@ xcuserdata/
 
 .stfolder/
 .stignore
+
+__pycache__/
+*.pyc

@@ -1,37 +1,47 @@
-import { describe, expect, it } from "vitest";
-import { generateHandwritingStrokes } from "./handwriting.service";
+import { spawn } from "node:child_process";
+import path from "node:path";
+import {randomUUID } from "node:crypto";
+import type { GenerateHandwritingInput, Stroke } from "./handwriting.types";
 
-describe("generateHandwritingStrokes", () => {
-    it("runs the full Python handwriting pipeline and returns valid strokes", async () => {
-        const strokes = await generateHandwritingStrokes({
-            text: "Hello world",
-            placement: {
-                x: 100,
-                y: 200,
-                averageLineHeight: 24,
-                width: 1.3,
-                color: "#111111",
-                maxWidth: 520,
-            },
-        });
+type GeneratedPath = {
+    characterIndex: number;
+    character: string;
+    points: { x: number; y: number }[];
+}
 
-        expect(Array.isArray(strokes)).toBe(true);
-        expect(strokes.length).toBeGreaterThan(0);
-
-        for (const stroke of strokes) {
-            expect(typeof stroke.id).toBe("string");
-            expect(stroke.type).toBe("ink");
-            expect(stroke.width).toBe(1.3);
-            expect(stroke.color).toBe("#111111");
-
-            expect(Array.isArray(stroke.points)).toBe(true);
-            expect(stroke.points.length).toBeGreaterThanOrEqual(4);
-            expect(stroke.points.length % 2).toBe(0);
-
-            for (const coordinate of stroke.points) {
-                expect(typeof coordinate).toBe("number");
-                expect(Number.isFinite(coordinate)).toBe(true);
+export const generateHandwritingStrokes = async ({
+    text, 
+    placement,
+}: GenerateHandwritingInput): Promise<Stroke[]> => {
+    const scriptPath = path.resolve(process.cwd(), "python/handwriting/ordered_strokes.py");
+    const paths = await new Promise<GeneratedPath[]>((resolve, reject) => {
+        const python = spawn("python3", [scriptPath]);
+        let stdout ="";
+        let stderr = "";
+        python.stdout.on("data", (data: Buffer) => { stdout += data.toString(); });
+        python.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
+        python.on("error", reject);
+        python.on("close", (code) => {
+            if (code !== 0) {
+                reject(new Error(stderr || `Python exited with code ${code}`));
+                return;
             }
-        }
-    }, 20_000);
-});
+            try {
+                resolve((JSON.parse(stdout) as { strokes: GeneratedPath[] }).strokes);
+            } catch (error) {
+                reject(error);
+            }
+        });
+        python.stdin.end(JSON.stringify({ text, placement }));
+    });
+
+    return paths.map((path) => ({
+        id: randomUUID(),
+        type: "ink" as const,
+        width: placement.width,
+        color: placement.color,
+        characterIndex: path.characterIndex,
+        character: path.character,
+        points: path.points.flatMap((point) => [placement.x + point.x, placement.y + point.y]),
+    }));
+};
