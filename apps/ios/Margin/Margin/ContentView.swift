@@ -32,29 +32,54 @@ struct ContentView: View {
             CanvasView(canvasView: $canvasView, isEraser: isEraser, handwritingManager: handwritingManager, onTextRecognized: {
                 recognizedText, answerPosition in statusText = "Thinking..."
                 
-                Task {
+                
+                Task { @MainActor in
                     do {
+                        statusText = "Thinking..."
+                        
+                        // 1. Get the AI answer.
                         let answer = try await AIService().ask(recognizedText)
                         
-                        await MainActor.run {
-                            statusText = "Answer recieved"
-                            
-                            annotations.append(
-                                AIAnnotation(
-                                    text: answer,
-                                    position: answerPosition
-                                )
+                        statusText = "Generating handwriting..."
+                        
+                        // 2. Generate ordered strokes.
+                        let placement = HandwritingPlacement(
+                            x: answerPosition.x,
+                            y: answerPosition.y,
+                            averageLineHeight: 24,
+                            width: 2,
+                            color: "#000000",
+                            maxWidth: max(
+                                100,
+                                canvasView.bounds.width - answerPosition.x - 20
                             )
-                            print("[AI] RESPONSE: \(answer)")
-                        }
-                    }   catch {
-                        await MainActor.run {
-                            statusText = "AI request failed"
-                            print("[AI] ERROR: \(error)")
-                        }
+                        )
+                        
+                        let strokes = try await HandwritingService().generate(
+                            text: answer,
+                            placement: placement
+                        )
+                        
+                        print("[HANDWRITING] Generated \(strokes.count) strokes")
+                        
+                        // 3. Draw the strokes onto PencilKit.
+                        statusText = "Writing..."
+                        
+                        let animator = HandwritingAnimator(
+                            canvasView: canvasView
+                        )
+                        
+                        await animator.animate(strokes: strokes)
+                        
+                        statusText = "Ready"
+                        
+                    } catch {
+                        statusText = "Handwriting failed"
+                        print("[HANDWRITING] ERROR: \(error)")
                     }
                 }
             })
+
                        
             ForEach($annotations) { $annotation in
                 ZStack(alignment: .topTrailing) {

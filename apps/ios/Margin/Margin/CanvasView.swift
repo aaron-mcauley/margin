@@ -427,19 +427,13 @@ struct CanvasView: UIViewRepresentable {
                     from: result.image
                 )
                 let underlineBounds = underline.stroke.renderBounds
-                
-                let answerPosition = CGPoint(
-                    x: underlineBounds.midX,
-                    y: underlineBounds.maxY + 60
-                )
-                
-                let visiblePosition = canvasView.convert(
-                    answerPosition,
-                    to: canvasView.superview
-                )
-                
-                onTextRecognized?(recognizedText, visiblePosition)
 
+                let answerPosition = CGPoint(
+                    x: underlineBounds.minX,
+                    y: underlineBounds.maxY + 25
+                )
+
+                onTextRecognized?(recognizedText, answerPosition)
                 
                 print("""
                 [OCR] SUCCESS

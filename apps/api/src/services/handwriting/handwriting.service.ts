@@ -1,57 +1,83 @@
-import { renderTextToImage } from "./fontRenderer.service";
-import { skeletonizeImage } from "./skeletonize.service";
-import { traceSkeletonToPaths } from "./traceStrokes.service";
-import type { GenerateHandwritingInput, Stroke } from "./handwriting.types";
 
-const makeId = () => `${Date.now()}-${Math.random()}`;
+import { spawn } from "node:child_process";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
+import type {
+    GenerateHandwritingInput,
+    Stroke,
+} from "./handwriting.types";
+
+type GeneratedPath = {
+    characterIndex: number;
+    character: string;
+    points: { x: number; y: number }[];
+};
 
 export const generateHandwritingStrokes = async ({
     text,
     placement,
 }: GenerateHandwritingInput): Promise<Stroke[]> => {
-    const renderedImage = await renderTextToImage({
-        text,
-        placement,
+    const scriptPath = path.resolve(
+        process.cwd(),
+        "python/handwriting/ordered_strokes.py"
+    );
+
+    const paths = await new Promise<GeneratedPath[]>((resolve, reject) => {
+        const python = spawn("python3", [scriptPath]);
+
+        let stdout = "";
+        let stderr = "";
+
+        python.stdout.on("data", (data: Buffer) => {
+            stdout += data.toString();
+        });
+
+        python.stderr.on("data", (data: Buffer) => {
+            stderr += data.toString();
+        });
+
+        python.on("error", reject);
+
+        python.on("close", (code) => {
+            if (code !== 0) {
+                reject(
+                    new Error(stderr || `Python exited with code ${code}`)
+                );
+                return;
+            }
+
+            try {
+                const result = JSON.parse(stdout) as {
+                    strokes: GeneratedPath[];
+                };
+
+                resolve(result.strokes);
+            } catch (error) {
+                reject(error);
+            }
+        });
+
+        python.stdin.end(JSON.stringify({ text, placement }));
     });
 
-    console.log("RENDERED IMAGE:", {
-        width: renderedImage.width,
-        height: renderedImage.height,
-        pixelCount: renderedImage.pixels.length,
-    });
-
-    const skeletonImage = await skeletonizeImage(renderedImage);
-
-    console.log("SKELETON IMAGE:", {
-        width: skeletonImage.width,
-        height: skeletonImage.height,
-        pixelCount: skeletonImage.pixels.length,
-    });
-
-    const paths = await traceSkeletonToPaths(skeletonImage);
-
-    console.log("TRACE RESULTS:", {
-        pathCount: paths.length,
-        firstPathLength: paths[0]?.length,
-        firstPath: paths[0]?.slice(0, 5),
-        placement,
-    });
-
-    const strokes: Stroke[] = paths.map((path) => ({
-        id: makeId(),
+    const strokes: Stroke[] = paths.map((generatedPath) => ({
+        id: randomUUID(),
         type: "ink",
-        //width: placement.width,
         width: placement.width,
         color: placement.color,
-        points: path.flatMap((point) => [
+        characterIndex: generatedPath.characterIndex,
+        character: generatedPath.character,
+        points: generatedPath.points.flatMap((point) => [
             placement.x + point.x,
             placement.y + point.y,
         ]),
     }));
 
-    console.log("GENERATED STROKES:", {
+    console.log("ORDERED HANDWRITING:", {
         strokeCount: strokes.length,
-        firstStroke: strokes[0],
+        characters: [...new Set(strokes.map((s) => s.characterIndex))].length,
+        firstCharacter: strokes[0]?.character,
+        lastCharacter: strokes.at(-1)?.character,
     });
 
     return strokes;
